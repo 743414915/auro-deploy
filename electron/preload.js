@@ -34,4 +34,10 @@ contextBridge.exposeInMainWorld('api', {
   removeDeployListener: () => {
     ipcRenderer.removeAllListeners('deploy:event');
   },
+  onRollbackEvent: (callback) => {
+    ipcRenderer.on('rollback:event', (_event, data) => callback(data));
+  },
+  removeRollbackListener: () => {
+    ipcRenderer.removeAllListeners('rollback:event');
+  },
 });

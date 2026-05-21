@@ -37,23 +37,23 @@
             <tr
               v-for="(v, i) in versions"
               :key="v"
-              :class="{ latest: i === 0 }"
+              :class="{ current: isCurrent(v) }"
             >
               <td class="col-status">
-                <span v-if="i === 0" class="badge badge-current">最新</span>
+                <span v-if="isCurrent(v)" class="badge badge-current">当前</span>
               </td>
               <td class="col-version">
                 <span class="version-name">{{ v }}</span>
               </td>
               <td class="col-actions">
                 <button
-                  v-if="i !== 0 && !rollingBack"
+                  v-if="!isCurrent(v) && !rollingBack"
                   class="btn btn-rollback"
                   @click="confirmRollback(v)"
                 >
                   回滚到此版本
                 </button>
-                <span v-if="i === 0" class="current-label">当前</span>
+                <span v-if="isCurrent(v)" class="current-label">运行中</span>
               </td>
             </tr>
           </tbody>
@@ -69,11 +69,24 @@
         <span>!!</span> {{ rollbackResult.error }}
       </template>
     </div>
+
+    <div class="card log-panel" v-if="rollbackLogs.length > 0 || rollingBack">
+      <div class="panel-header">
+        <h2>回滚日志</h2>
+        <button class="btn btn-sm" @click="rollbackLogs = []">清空</button>
+      </div>
+      <div class="log-container" ref="rollbackLogContainer">
+        <div v-for="(log, i) in rollbackLogs" :key="i" :class="['log-line', log.type]">
+          <span class="log-time">{{ formatTime(log.time) }}</span>
+          <span class="log-msg">{{ log.message }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps<{ configPath: string; visible: boolean }>()
 
@@ -85,6 +98,16 @@ const loading = ref(false)
 const error = ref('')
 const rollingBack = ref(false)
 const rollbackResult = ref<{ success: boolean; error?: string } | null>(null)
+const rollbackLogs = ref<{ type: string; message: string; time: string }[]>([])
+const rollbackLogContainer = ref<HTMLElement | null>(null)
+
+function formatTime(time: string) {
+  return new Date(time).toLocaleTimeString('zh-CN')
+}
+
+function isCurrent(v: string) {
+  return current.value && current.value === v
+}
 
 async function loadRepos() {
   if (!window.api) return
@@ -122,22 +145,50 @@ async function loadVersions() {
 
 async function confirmRollback(version: string) {
   rollbackResult.value = null
+  rollbackLogs.value = []
 
   if (!window.api) return
 
   rollingBack.value = true
+
+  const eventHandler = async (event: any) => {
+    if (event.type === 'log') {
+      rollbackLogs.value.push(event.data)
+      nextTick(() => {
+        if (rollbackLogContainer.value) {
+          rollbackLogContainer.value.scrollTop = rollbackLogContainer.value.scrollHeight
+        }
+      })
+    } else if (event.type === 'done') {
+      if (event.data.success) {
+        rollbackResult.value = { success: true }
+        // Set current immediately from the rolled-back version
+        current.value = event.data.version || version
+        // Also refresh the full list from server
+        loadVersions()
+      } else {
+        rollbackResult.value = { success: false, error: event.data.error }
+      }
+      rollingBack.value = false
+    }
+  }
+
+  window.api.onRollbackEvent(eventHandler)
+
   try {
     const res = await window.api.rollback(props.configPath, repoIndex.value, version)
-    if (res.success) {
-      rollbackResult.value = { success: true }
-      await loadVersions()
-    } else {
+    if (!res.success && !rollbackResult.value) {
       rollbackResult.value = { success: false, error: res.error }
     }
   } catch (err: any) {
-    rollbackResult.value = { success: false, error: err.message }
+    if (!rollbackResult.value) {
+      rollbackResult.value = { success: false, error: err.message }
+    }
   } finally {
     rollingBack.value = false
+    nextTick(() => {
+      window.api.removeRollbackListener()
+    })
   }
 }
 
@@ -153,6 +204,10 @@ onMounted(async () => {
     await loadRepos()
     loadVersions()
   }
+})
+
+onUnmounted(() => {
+  if (window.api) window.api.removeRollbackListener()
 })
 </script>
 
@@ -301,7 +356,7 @@ onMounted(async () => {
   border-bottom: 1px solid var(--border);
 }
 
-tr.latest {
+tr.current {
   background: #eff6ff;
 }
 
@@ -361,5 +416,50 @@ tr:hover {
   background: #fef2f2;
   border: 1px solid #fecaca;
   color: #991b1b;
+}
+
+.log-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.log-container {
+  height: 200px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: #1a1a2e;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  user-select: text;
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0;
+  line-height: 1.6;
+}
+
+.log-line.info { color: #d1d5db; }
+.log-line.success { color: #34d399; }
+.log-line.error { color: #f87171; }
+
+.log-time {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.log-msg {
+  word-break: break-all;
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  font-size: 11px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
 }
 </style>

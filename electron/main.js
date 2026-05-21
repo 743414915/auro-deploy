@@ -292,12 +292,16 @@ ipcMain.handle('versions:list', async (_event, { configPath, repoIndex }) => {
     const listResult = await ssh.exec(
       `ls -1 ${remotePathQ}/.backup/ | sort -r`
     );
-    const versions = listResult.split('\n').filter(Boolean).map((f) => f.replace('.tar.gz', ''));
+    const versions = listResult.split('\n').filter(Boolean)
+      .filter((f) => f.endsWith('.tar.gz'))
+      .map((f) => f.replace('.tar.gz', ''));
 
+    // Read current marker
     let current = null;
-    if (versions.length > 0) {
-      current = versions[0];
-    }
+    try {
+      const marker = await ssh.exec(`cat ${remotePathQ}/.backup/.current 2>/dev/null || echo ""`);
+      current = marker.trim();
+    } catch (_) {}
 
     ssh.disconnect();
     return { success: true, data: { versions, current } };
@@ -306,14 +310,22 @@ ipcMain.handle('versions:list', async (_event, { configPath, repoIndex }) => {
   }
 });
 
-ipcMain.handle('rollback:execute', async (_event, { configPath, repoIndex, version }) => {
+ipcMain.handle('rollback:execute', async (event, { configPath, repoIndex, version }) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  function rlog(type, message) {
+    send(win, 'rollback:event', { type: 'log', data: { type, message, time: new Date().toISOString() } });
+  }
   try {
+    rlog('info', `准备回滚到: ${version}`);
     const { load, getRepo } = loadConfigModule();
     const { SSHClient } = loadSshModule();
     const config = load(configPath || getDefaultConfigPath());
     const repo = getRepo(config, resolveRepoIndex(repoIndex));
+
+    rlog('info', `连接 ${repo.server.host}:${repo.server.port} ...`);
     const ssh = new SSHClient(repo);
     await ssh.connect();
+    rlog('success', 'SSH 连接成功');
 
     const backupFile = `"${repo.deploy.remotePath}/.backup/${version}.tar.gz"`;
     const remotePath = `"${repo.deploy.remotePath}"`;
@@ -321,27 +333,51 @@ ipcMain.handle('rollback:execute', async (_event, { configPath, repoIndex, versi
       await ssh.exec(`test -f ${backupFile}`);
     } catch {
       ssh.disconnect();
+      rlog('error', `备份不存在: ${version}`);
+      send(win, 'rollback:event', { type: 'done', data: { success: false, error: `备份不存在: ${version}` } });
       return { success: false, error: `备份不存在: ${version}` };
     }
+    rlog('info', '备份文件存在，开始恢复...');
 
-    // Clear current files (keep .backup hidden dir since glob * skips dotfiles)
-    await ssh.exec(`rm -rf ${remotePath}/*`);
-    // Restore from backup tarball
-    const tarResult = await ssh.exec(`tar -xzf ${backupFile} -C ${remotePath} 2>&1 || echo "TAR_FAILED"`);
-    if (tarResult.includes('TAR_FAILED')) {
-      throw new Error(`恢复备份失败: ${tarResult}`);
+    rlog('info', '清空当前文件...');
+    await ssh.exec(`rm -rf "${repo.deploy.remotePath}/"*`);
+    rlog('info', '检查备份文件...');
+    const backupInfo = await ssh.exec(`ls -lh ${backupFile} 2>&1 || echo "NOT_FOUND"`);
+    rlog('info', `备份: ${backupInfo.trim()}`);
+    if (backupInfo.includes('NOT_FOUND') || backupInfo.includes(' 0 ')) {
+      throw new Error(`备份文件无效: ${backupInfo.trim()}`);
     }
+    rlog('info', '解压备份文件...');
+    const tarResult = await ssh.exec(`tar -xzvf ${backupFile} -C ${remotePath} 2>&1`);
+    rlog('info', tarResult || '(无输出)');
+    // Verify files were restored
+    const verifyResult = await ssh.exec(`ls -A ${remotePath} 2>&1 | head -10 || echo "EMPTY"`);
+    rlog('info', `恢复后文件: ${verifyResult.trim()}`);
+    if (verifyResult.includes('EMPTY') || !verifyResult.trim()) {
+      throw new Error('恢复后目录为空，备份可能损坏');
+    }
+    rlog('success', '文件恢复完成');
 
-    if (repo.deploy.postDeployCommands.length > 0) {
+    // Mark current version
+    await ssh.exec(`echo "${version}" > ${remotePath}/.backup/.current`);
+
+    if (repo.deploy.postDeployCommands && repo.deploy.postDeployCommands.length > 0) {
       for (const cmd of repo.deploy.postDeployCommands) {
-        await ssh.exec(cmd);
+        rlog('info', `执行: ${cmd}`);
+        const out = await ssh.exec(cmd);
+        if (out) rlog('info', out);
       }
     }
 
     ssh.disconnect();
+    rlog('success', '回滚成功!');
+    send(win, 'rollback:event', { type: 'done', data: { success: true, version } });
     return { success: true };
   } catch (err) {
-    return { success: false, error: err.message };
+    const errMsg = err.message || String(err);
+    rlog('error', errMsg);
+    send(win, 'rollback:event', { type: 'done', data: { success: false, error: errMsg } });
+    return { success: false, error: errMsg };
   }
 });
 
@@ -451,7 +487,13 @@ ipcMain.handle('deploy:start', async (event, { configPath, repoIndex, branch, ta
       await ssh.exec(
         `tar -czf ${backupFile} --exclude=.backup -C ${remotePathQ} .`
       );
-      log('info', `备份完成: ${version}.tar.gz`);
+      // Verify backup was created
+      const backupCheck = await ssh.exec(`ls -lh ${backupFile} 2>&1 || echo "FAILED"`);
+      if (backupCheck.includes('FAILED') || backupCheck.includes(' 0 ')) {
+        log('warn', `备份可能失败: ${backupCheck.trim()}`);
+      } else {
+        log('info', `备份完成: ${backupCheck.trim()}`);
+      }
     } else {
       log('info', '远程目录为空，跳过备份');
     }
@@ -480,8 +522,9 @@ ipcMain.handle('deploy:start', async (event, { configPath, repoIndex, branch, ta
     // Step 8: Deploy (clear old files, extract new)
     progress('解压部署', 'running');
     // Remove all visible files/dirs (glob * skips dotfiles like .backup)
-    await ssh.exec(`rm -rf ${remotePathQ}/*`);
-    await ssh.exec(`tar -xzf ${remoteArchive} -C ${remotePathQ}`);
+    await ssh.exec(`rm -rf "${repo.deploy.remotePath}/"*`);
+    const deployTarOut = await ssh.exec(`tar -xzvf ${remoteArchive} -C ${remotePathQ} 2>&1`);
+    log('info', deployTarOut || '解压完成');
     await ssh.exec(`rm -f ${remoteArchive}`);
     log('info', '文件已部署到远程路径');
     progress('解压部署', 'done');
@@ -509,6 +552,9 @@ ipcMain.handle('deploy:start', async (event, { configPath, repoIndex, branch, ta
       }
       log('info', `清理 ${toRemove.length} 个旧备份`);
     }
+
+    // Mark current version
+    await ssh.exec(`echo "${version}" > ${remotePathQ}/.backup/.current`);
 
     ssh.disconnect();
     fsExtra.removeSync(localArchive);

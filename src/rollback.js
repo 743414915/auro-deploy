@@ -10,13 +10,21 @@ async function listVersions(config) {
   await ssh.connect();
 
   try {
-    const listResult = await ssh.exec(`ls -1 ${deployCfg.remotePath}/.backup/ | sort -r`);
-    const backups = listResult.split('\n').filter(Boolean);
+    const listResult = await ssh.exec(`ls -1 "${deployCfg.remotePath}/.backup/" | sort -r`);
+    const backups = listResult.split('\n').filter(Boolean)
+      .filter((f) => f.endsWith('.tar.gz'));
 
     if (backups.length === 0) {
       console.log(chalk.yellow('  没有可用的备份'));
       return [];
     }
+
+    // Read current marker
+    let current = null;
+    try {
+      const marker = await ssh.exec(`cat "${deployCfg.remotePath}/.backup/.current" 2>/dev/null || echo ""`);
+      current = marker.trim();
+    } catch (_) {}
 
     const versions = backups.map((f) => f.replace('.tar.gz', ''));
 
@@ -24,13 +32,14 @@ async function listVersions(config) {
     console.log(chalk.cyan('  可用备份:'));
     console.log('');
 
-    versions.forEach((v, i) => {
-      const prefix = i === 0 ? chalk.green.bold('  * ') : '    ';
+    versions.forEach((v) => {
+      const isCurrent = current && current === v;
+      const prefix = isCurrent ? chalk.green.bold('  * ') : '    ';
       console.log(prefix + chalk.white(v));
     });
 
     console.log('');
-    console.log(chalk.gray(`  * 标记为最新备份`));
+    console.log(chalk.gray('  * 标记为当前版本'));
     return versions;
   } finally {
     ssh.disconnect();
@@ -58,8 +67,8 @@ async function rollback(config, targetVersion) {
   await ssh.connect();
 
   try {
-    const backupFile = `"${deployCfg.remotePath}/.backup/${targetVersion}.tar.gz"`;
-    const remotePath = `"${deployCfg.remotePath}"`;
+    const rp = deployCfg.remotePath;
+    const backupFile = `"${rp}/.backup/${targetVersion}.tar.gz"`;
 
     // 检查备份是否存在
     try {
@@ -71,12 +80,15 @@ async function rollback(config, targetVersion) {
 
     // 清空当前文件（.backup 由 glob 保护）
     spinner.text = chalk.blue('恢复备份...');
-    await ssh.exec(`rm -rf ${remotePath}/*`);
-    const result = await ssh.exec(`tar -xzf ${backupFile} -C ${remotePath} 2>&1 || echo "TAR_FAILED"`);
+    await ssh.exec(`rm -rf "${rp}/"*`);
+    const result = await ssh.exec(`tar -xzf ${backupFile} -C "${rp}" 2>&1 || echo "TAR_FAILED"`);
     if (result.includes('TAR_FAILED')) {
       spinner.fail(chalk.red(`恢复备份失败: ${result}`));
       return;
     }
+
+    // Mark current version
+    await ssh.exec(`echo "${targetVersion}" > "${rp}/.backup/.current"`);
 
     // 执行部署后命令
     if (config.deploy.postDeployCommands.length > 0) {

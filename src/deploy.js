@@ -37,7 +37,7 @@ async function run(config, commitInfo) {
   const buildDir = getBuildDir(config);
   const localArchive = path.resolve(config.git.cloneDir, '..', `deploy_${version}.tar.gz`);
   const remoteArchive = `/tmp/deploy_${version}.tar.gz`;
-  const remotePathQ = `"${deployCfg.remotePath}"`;
+  const rp = deployCfg.remotePath;
   const spinner = ora();
 
   // 0. 部署前文件覆盖
@@ -65,14 +65,14 @@ async function run(config, commitInfo) {
   try {
     // 3. 备份旧文件（首次部署跳过）
     spinner.start(chalk.blue('备份旧文件...'));
-    const backupFile = `${remotePathQ}/.backup/${version}.tar.gz`;
+    const backupFile = `"${rp}"/.backup/${version}.tar.gz`;
     const hasFiles = await ssh.exec(
-      `ls -A ${remotePathQ} | grep -v '^\\.backup$' | head -1 || echo "EMPTY"`
+      `ls -A "${rp}" | grep -v '^\\.backup$' | head -1 || echo "EMPTY"`
     );
     if (!hasFiles.includes('EMPTY')) {
-      await ssh.exec(`mkdir -p ${remotePathQ}/.backup`);
+      await ssh.exec(`mkdir -p "${rp}"/.backup`);
       await ssh.exec(
-        `tar -czf ${backupFile} --exclude=.backup -C ${remotePathQ} .`
+        `tar -czf ${backupFile} --exclude=.backup -C "${rp}" .`
       );
       spinner.succeed(chalk.green(`备份完成: ${version}.tar.gz`));
     } else {
@@ -95,8 +95,8 @@ async function run(config, commitInfo) {
 
     // 6. 解压到目标路径（覆盖旧文件，.backup 由 glob 保护）
     spinner.start(chalk.blue('部署文件...'));
-    await ssh.exec(`rm -rf ${remotePathQ}/*`);
-    await ssh.exec(`tar -xzf ${remoteArchive} -C ${remotePathQ}`);
+    await ssh.exec(`rm -rf "${rp}/"*`);
+    await ssh.exec(`tar -xzf ${remoteArchive} -C "${rp}"`);
     await ssh.exec(`rm -f ${remoteArchive}`);
     spinner.succeed(chalk.green('部署完成'));
 
@@ -111,18 +111,21 @@ async function run(config, commitInfo) {
 
     // 8. 清理旧备份
     spinner.start(chalk.blue('清理旧备份...'));
-    const listResult = await ssh.exec(`ls -1 ${remotePathQ}/.backup/ | sort -r`);
+    const listResult = await ssh.exec(`ls -1 "${rp}"/.backup/ | sort -r`);
     const backups = listResult.split('\n').filter(Boolean);
     if (backups.length > deployCfg.backupKeep) {
       const toRemove = backups.slice(deployCfg.backupKeep);
       for (const f of toRemove) {
-        await ssh.exec(`rm -f ${remotePathQ}/.backup/${f}`);
+        await ssh.exec(`rm -f "${rp}"/.backup/${f}`);
       }
       console.log(chalk.gray(`  清理了 ${toRemove.length} 个旧备份`));
     }
     spinner.succeed(chalk.green(`保留最近 ${deployCfg.backupKeep} 个备份`));
 
   } finally {
+    // Mark current version
+    await ssh.exec(`echo "${version}" > "${rp}"/.backup/.current`);
+
     ssh.disconnect();
     // 清理本地压缩包
     fs.removeSync(localArchive);

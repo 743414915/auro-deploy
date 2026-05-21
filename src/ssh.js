@@ -8,33 +8,76 @@ class SSHClient {
     this.client = new Client();
   }
 
-  connect() {
-    return new Promise((resolve, reject) => {
-      this.client.on('ready', () => {
-        console.log('  ✓ SSH 连接成功');
-        resolve();
+  connect(retries = 3) {
+    const doConnect = (attempt) => {
+      return new Promise((resolve, reject) => {
+        // Create a fresh client for each attempt
+        if (attempt > 1) {
+          this.client = new Client();
+        }
+        this.client.on('ready', () => {
+          resolve();
+        });
+        this.client.on('error', (err) => {
+          if (attempt < retries && (
+            err.message.includes('Connection lost') ||
+            err.message.includes('handshake') ||
+            err.message.includes('Timed out') ||
+            err.message.includes('connect ETIMEDOUT')
+          )) {
+            console.log(`  SSH 连接重试 (${attempt}/${retries})...`);
+            setTimeout(() => doConnect(attempt + 1).then(resolve).catch(reject), 2000 * attempt);
+          } else {
+            reject(new Error(`SSH 连接失败: ${err.message}`));
+          }
+        });
+        this.client.on('end', () => {});
+
+        const opts = {
+          host: this.config.host,
+          port: this.config.port,
+          username: this.config.username,
+          readyTimeout: 30000,
+          keepaliveInterval: 10000,
+          algorithms: {
+            kex: [
+              'diffie-hellman-group-exchange-sha256',
+              'diffie-hellman-group14-sha256',
+              'diffie-hellman-group14-sha1',
+              'ecdh-sha2-nistp256',
+              'ecdh-sha2-nistp384',
+              'ecdh-sha2-nistp521',
+            ],
+            cipher: [
+              'aes128-ctr',
+              'aes192-ctr',
+              'aes256-ctr',
+              'aes128-gcm@openssh.com',
+              'aes256-gcm@openssh.com',
+            ],
+            serverHostKey: [
+              'ssh-rsa',
+              'rsa-sha2-512',
+              'rsa-sha2-256',
+              'ecdsa-sha2-nistp256',
+              'ecdsa-sha2-nistp384',
+              'ecdsa-sha2-nistp521',
+              'ssh-ed25519',
+            ],
+          },
+        };
+
+        if (this.config.privateKey) {
+          opts.privateKey = fs.readFileSync(this.config.privateKey);
+          if (this.config.passphrase) opts.passphrase = this.config.passphrase;
+        } else if (this.config.password) {
+          opts.password = this.config.password;
+        }
+
+        this.client.connect(opts);
       });
-      this.client.on('error', (err) => {
-        reject(new Error(`SSH 连接失败: ${err.message}`));
-      });
-
-      const opts = {
-        host: this.config.host,
-        port: this.config.port,
-        username: this.config.username,
-        readyTimeout: 15000,
-        keepaliveInterval: 10000,
-      };
-
-      if (this.config.privateKey) {
-        opts.privateKey = fs.readFileSync(this.config.privateKey);
-        if (this.config.passphrase) opts.passphrase = this.config.passphrase;
-      } else if (this.config.password) {
-        opts.password = this.config.password;
-      }
-
-      this.client.connect(opts);
-    });
+    };
+    return doConnect(1);
   }
 
   exec(command) {
