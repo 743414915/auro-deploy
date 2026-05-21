@@ -162,10 +162,6 @@ async function confirmRollback(version: string) {
     } else if (event.type === 'done') {
       if (event.data.success) {
         rollbackResult.value = { success: true }
-        // Set current immediately from the rolled-back version
-        current.value = event.data.version || version
-        // Also refresh the full list from server
-        loadVersions()
       } else {
         rollbackResult.value = { success: false, error: event.data.error }
       }
@@ -177,7 +173,11 @@ async function confirmRollback(version: string) {
 
   try {
     const res = await window.api.rollback(props.configPath, repoIndex.value, version)
-    if (!res.success && !rollbackResult.value) {
+    if (res.success) {
+      // Update current version immediately from the rollback result
+      current.value = version
+      await loadVersions()
+    } else if (!rollbackResult.value) {
       rollbackResult.value = { success: false, error: res.error }
     }
   } catch (err: any) {
