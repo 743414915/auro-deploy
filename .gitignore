@@ -1,0 +1,13 @@
+node_modules/
+dist/
+release/
+.deploy-cache/
+.deploy-simulate/
+deploy_*.tar.gz
+deploy.config.json
+*.log
+.env
+.env.local
+*.tsbuildinfo
+.DS_Store
+Thumbs.db

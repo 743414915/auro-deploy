@@ -1,0 +1,24 @@
+appId: com.auto-deploy.app
+productName: Auto Deploy
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - src/**/*.js
+  - node_modules/**/*
+  - package.json
+
+win:
+  target:
+    - dir
+
+mac:
+  target: dmg
+
+linux:
+  target: AppImage

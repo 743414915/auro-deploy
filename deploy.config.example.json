@@ -1,0 +1,32 @@
+{
+  "repos": [
+    {
+      "name": "默认仓库",
+      "git": {
+        "url": "https://gitee.com/user/repo.git",
+        "branch": "main",
+        "cloneDir": "./.deploy-cache",
+        "username": "",
+        "token": ""
+      },
+      "build": {
+        "command": "npm install && npm run build",
+        "outputDir": "dist"
+      },
+      "server": {
+        "host": "192.168.1.100",
+        "port": 22,
+        "username": "root",
+        "password": "",
+        "privateKey": "~/.ssh/id_rsa"
+      },
+      "deploy": {
+        "remotePath": "/var/www/myapp",
+        "backupKeep": 5,
+        "preDeployCommands": [],
+        "postDeployCommands": ["nginx -s reload"],
+        "preDeployFiles": []
+      }
+    }
+  ]
+}

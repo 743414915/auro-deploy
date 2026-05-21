@@ -1,0 +1,73 @@
+{
+  "name": "auto-deploy",
+  "version": "1.0.0",
+  "description": "前端自动化部署工具 - GUI桌面应用 + CLI",
+  "main": "electron/main.js",
+  "bin": {
+    "auto-deploy": "./src/cli.js"
+  },
+  "build": {
+    "appId": "com.autodeploy.app",
+    "productName": "Auto Deploy",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "src/**/*.js",
+      "node_modules/**/*",
+      "!node_modules/**/LICENSE",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.ts"
+    ],
+    "asar": true,
+    "win": {
+      "target": "dir",
+      "sign": null
+    }
+  },
+  "scripts": {
+    "cli:deploy": "node src/cli.js deploy",
+    "cli:rollback": "node src/cli.js rollback",
+    "cli:list": "node src/cli.js list",
+    "dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "vite:dev": "vite",
+    "build": "vite build",
+    "electron:pack": "vite build && electron-rebuild -f -w ssh2 && node -e \"try{require('fs-extra').removeSync('release\\\\win-unpacked')}catch(e){console.log('cleanup skipped, retrying...')}\" && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
+    "build:web": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "deploy",
+    "frontend",
+    "ssh",
+    "automation",
+    "electron"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "archiver": "^8.0.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "fs-extra": "^11.3.5",
+    "ora": "^9.4.0",
+    "simple-git": "^3.36.0",
+    "ssh2": "^1.17.0",
+    "vue": "^3.5.34"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^23.6.0",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vue-tsc": "^2.2.12",
+    "wait-on": "^7.2.0"
+  }
+}
