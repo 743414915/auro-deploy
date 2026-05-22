@@ -35,7 +35,7 @@
     "dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "vite:dev": "vite",
     "build": "vite build",
-    "electron:pack": "vite build && electron-rebuild -f -w ssh2 && node -e \"try{require('fs-extra').removeSync('release\\\\win-unpacked')}catch(e){console.log('cleanup skipped, retrying...')}\" && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
+    "electron:pack": "node -e \"try{require('fs-extra').removeSync('release')}catch(e){}\" && vite build && electron-rebuild -f -w ssh2 && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
     "build:web": "vite build",
     "preview": "vite preview"
   },
