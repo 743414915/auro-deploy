@@ -35,7 +35,7 @@
     "dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "vite:dev": "vite",
     "build": "vite build",
-    "electron:pack": "node -e \"try{require('fs-extra').removeSync('release')}catch(e){}\" && vite build && electron-rebuild -f -w ssh2 && node -e \"var p=require('path').join(process.env.LOCALAPPDATA||'','electron-builder','Cache','winCodeSign','winCodeSign-2.6.0','rcedit-x64.exe');try{require('fs').unlinkSync(p);console.log('removed rcedit')}catch(e){console.log('rcedit not found, ok')}\" && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
+    "electron:pack": "node -e \"try{require('fs-extra').removeSync('release')}catch(e){}\" && vite build && node -e \"try{require('fs-extra').removeSync('node_modules/cpu-features')}catch(e){}\" && electron-rebuild -f -w ssh2 && node -e \"var p=require('path');var d=p.join(process.env.LOCALAPPDATA||'','electron-builder','Cache','winCodeSign','winCodeSign-2.6.0');var x64=p.join(d,'rcedit-x64.exe');var ia32=p.join(d,'rcedit-ia32.exe');var fs=require('fs');if(fs.existsSync(ia32)&&!fs.existsSync(x64)){fs.copyFileSync(ia32,x64);console.log('rcedit-x64 copied from ia32')}\" && cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ electron-builder",
     "build:web": "vite build",
     "preview": "vite preview"
   },
